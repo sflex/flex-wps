@@ -130,24 +130,24 @@ $sth->finish;
       $ban = $back_ends{$cfg{Portal_backend}}->quote($ban);
 
       $Flex_WPS->SQL_Edit($cfg{Portal_backend}, "UPDATE `ban` SET `count` =count + 1, `last_date` = '$DATE' WHERE `banid` = $ban LIMIT 1 ;");
-      $cfg{core_error} = 'You are band from this site at site ban'." IP:$ENV{'REMOTE_ADDR'}";
+      $cfg{core_error} = 'You are band from this site at site ban IP: '.$ENV{'REMOTE_ADDR'};
       }
-
+# Check ban IP's is running flag
 $cfg{check_ban} = 1;
 
- if ($ENV{'REMOTE_ADDR'} eq '192.168.1.103') {
-     Crash_em();
- }
+# if ($ENV{'REMOTE_ADDR'} eq '192.168.1.103') {
+#     Crash_em();
+# }
 }
 
-sub Crash_em {
-print <<HEADER;
-Location: http://speedtest.tele2.net/1000GB.zip
+#sub Crash_em {
+#print <<HEADER;
+#Location: http://speedtest.tele2.net/1000GB.zip
 
-HEADER
+#HEADER
   # http://speedtest.tele2.net/1000GB.zip
 
-    exit(0);
-}
+#    exit(0);
+#}
 
 1;
