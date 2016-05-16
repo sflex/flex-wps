@@ -6,7 +6,7 @@ Should work under mod_perl<br /><br />
 Only prints XHTML, for now..<br /><br />
 
 Requires:<br /> 
-Perl 5.08 (because of the way exporter.pm works)<br />
+Perl 5.08 (exporter.pm could still be the reason, but I removed the use of AutoLoad and never tested a higher version.)<br />
 Apache HTTP server<br />
 MySQL server<br /><br />
 
