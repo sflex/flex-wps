@@ -1,8 +1,9 @@
 # flex-wps<br />
 
 Flex Web Portal System<br />
-Perl object oriented web framework built into a CMS<br />
+Perl object oriented lightweight web framework built into a CMS<br />
 Should work under mod_perl<br /><br />
+Only prints XHTML, for now..<br /><br />
 
 Requires:<br /> 
 Perl 5.08 (because of the way exporter.pm works)<br />
@@ -15,5 +16,8 @@ Perl Modules Required:<br />
 GD::SecurityImage<br />
 Digest::SHA1<br />
 Image::ExifTool<br />
-DBI<br />
+DBI<br /><br />
 
+TO DO:<br />
+Would like to move this project to the next evolution, by turning the theme in to a single database with place holders and program it to use AUBBC2. This change will allow the theme to controle what HTML type the page will run and will have an editable database for UBBC tags to add or remove.<br />
+Make the files ready for server install.<br />
