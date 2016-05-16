@@ -20,4 +20,5 @@ DBI<br /><br />
 
 TO DO:<br />
 Would like to move this project to the next evolution, by turning the theme in to a single database with place holders and program it to use AUBBC2. This change will allow the theme to controle what HTML type the page will run and will have an editable database for UBBC tags to add or remove.<br />
+Fix what is preventing the system from using the latest version of Perl 5.22 not 6...<br />
 Make the files ready for server install.<br />
