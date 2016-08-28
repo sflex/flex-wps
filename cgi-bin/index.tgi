@@ -1,0 +1,62 @@
+#!C:/Perl64/bin/perl.exe -w
+BEGIN {
+$| = 1;
+use strict;
+use warnings;
+use vars qw(%cfg %mysql $Flex_WPS %user_data $query $AUBBC);
+use lib 'C:/xampp/cgi-bin/Flex2/lib';
+$cfg{main_path} = 'C:/xampp/cgi-bin/Flex2';
+use Flex_Porter; # Start Porter
+}
+#die('here');
+use Flex_WPS;
+$Flex_WPS = Flex_WPS->new();
+
+# get database info
+require "$cfg{main_path}/db/config.pl";
+# Connect to a database and return a special name
+my $DB_Name = $Flex_WPS->SQL_Connect(
+        backend_name => $mysql{backendname}, # database name
+        username => $mysql{username},
+        password => $mysql{password},
+        host => $mysql{host},
+        port => $mysql{port},
+        DBI_Settings => { 'RaiseError' => 1, 'AutoCommit' => 0, },
+        );
+
+# Load portal settings
+$Flex_WPS->Portal_Config(
+        backend_name  => $DB_Name,# Default all backends to this one
+        portal_config => 1, # Main portal config ID to load
+        Auth_DB      => '', # Auth backend change
+        Theme_DB     => '', # Theme backend change
+        SubLoad_DB   => '', # SubLoad backend change
+        Portal_DB    => '', # Portal backend change
+        );
+
+# Load CGI.pm and return the object
+$query = $Flex_WPS->Load_CGI(
+        POST_MAX => 100, # small post size 100kb
+        DISABLE_UPLOADS => 1, # no uploads
+        HEADERS_ONCE => 1, # one header
+        MOD_PERL => 0, # no mod_perl
+        );
+
+# Authenticate user
+%user_data = $Flex_WPS->Auth_Session();
+
+# Load AUBBC2 bbcode module
+$AUBBC = $Flex_WPS->AUBBC(
+        'MEMOIZE'    =>  1,
+        'CONFIG'     => 'C:\xampp\cgi-bin\Flex2\lib\AUBBC2\BBcode_Config.pl',
+        'ESCAPE'     =>  0,
+        'ACCESS_LOG' =>  0,);
+# add_a_setting ( Hash_Name, value );
+$AUBBC->add_a_setting('images_url', $cfg{imagesurl});
+$AUBBC->user_level($user_data{sec_level});
+
+# Load Subload
+$Flex_WPS->SubLoad(location => 'START',);
+
+# Print the portal
+$Flex_WPS->print_portal();
