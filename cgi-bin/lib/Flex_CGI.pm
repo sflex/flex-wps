@@ -2,13 +2,14 @@ package Flex_CGI;
 
 use strict;
 use warnings;
-                           
-our $VERSION = 0.10;
+
+our $VERSION = 0.12;
 
 # global settings
 our $POST_MAX            = 1024 * 100;  # limit total parsing size to 100kb
 our $GET_MAX             = 1024 * 100;  # limit total parsing size to 100kb
 our $COOKIE_MAX          = 1024 * 100;  # limit total parsing size to 100kb
+our $VIRTUAL_MAX         = 1024 * 100;  # limit total parsing size to 100kb
 our $NO_UNDEF_PARAMS     = 1;           # parameters exist with blank values
 our $HEADERS_ONCE        = 1;           # print the Header once
 our $NPH                 = 0;           # not used on apache
@@ -22,6 +23,7 @@ my %COOKIES      = ();
 my $header_ct    =  0;
 my @virtual_url  = ();
 
+# From about here to...
 our $EBCDIC      = 0;
 
 our $CRLF;
@@ -34,6 +36,7 @@ if ($^O =~ /^VMS/i) {
 } else {
   $CRLF = "\015\012";
 }
+# here. is all bullshit and could be our $VALUE or maybe $/ to shave off time.
 
 sub new {
 # was thinking mod_perl may need this, test...
@@ -42,30 +45,40 @@ sub new {
 %COOKIES      = ();
 @virtual_url  = ();
 
-# avoid large parsing
-my $query_string = $ENV{'QUERY_STRING'} || $ENV{'REDIRECT_QUERY_STRING'} || '';
 my $raw_cookie   = $ENV{'HTTP_COOKIE'}  || $ENV{'COOKIE'} || '';
 my $request_URI  = $ENV{'REQUEST_URI'}  || '';
+my $content_type = $ENV{'CONTENT_TYPE'} || '';
+my $request_meth = $ENV{'REQUEST_METHOD'} || '';
+my $query_string = '';
+
+# Default get but make sure its get method with no type
+$query_string ||= $ENV{'QUERY_STRING'} || $ENV{'REDIRECT_QUERY_STRING'}
+ if $request_meth eq 'GET' && ! $content_type;
 
 my $COOKIE_LENGTH = length($raw_cookie)    || 0;
 my $POST_LENGTH   = $ENV{'CONTENT_LENGTH'} || 0;
 my $GET_LENGTH    = length($query_string)  || 0;
 
+
+# avoid large parsing
  if ($POST_LENGTH && $POST_MAX > 0 && $POST_LENGTH > $POST_MAX
   || $GET_LENGTH && $GET_MAX > 0 && $GET_LENGTH > $GET_MAX
   || $COOKIE_LENGTH && $COOKIE_MAX > 0 && $COOKIE_LENGTH > $COOKIE_MAX) {
-  # 413 status code to header also?
+  # https://tools.ietf.org/html/rfc7231#section-6.5.11
   $flex_error .=
-'413 Request entity too large: '.$POST_LENGTH.' bytes '.$GET_LENGTH.' bytes '
+'413 Payload Too Large: '.$POST_LENGTH.' bytes '.$GET_LENGTH.' bytes '
 .$COOKIE_LENGTH.' bytes. Limit is: '.$POST_MAX.'! IP:'.$ENV{'REMOTE_ADDR'}."\n";
  }
   else {
   # Flex WPS doesnt use much so it doesnt do much.
-  # POST, PUT, GET, HEAD....
+  # POST, GET....
+  # https://tools.ietf.org/html/rfc3875#section-6.3.5
   if ($POST_LENGTH || $GET_LENGTH) {
   # use post over get because get is default
-  if ($ENV{'REQUEST_METHOD'} eq 'POST'
-   || $ENV{'REQUEST_METHOD'} eq 'PUT') {
+  # Was thinking of a REST api, but as I read more this module should just
+  # use POST and GET only. I have no use for a REST API.
+  if ($request_meth eq 'POST'
+   && (!$content_type || $content_type eq 'application/x-www-form-urlencoded')) {
    $query_string = undef;
    read(\*STDIN, $query_string, $POST_LENGTH); # post
   }
@@ -112,11 +125,34 @@ my $GET_LENGTH    = length($query_string)  || 0;
   # www.place.com//place//or/here/
   #          here^  here^        ^There at the end! because of the slash /
   if ($VIRTUAL_URL && $request_URI) {
-  # take out first slash and ? beyond
+  # take out first slash or ? beyond
     $request_URI =~ s/\A\/|\?.*?\z//g;
-    @virtual_url = map { url_decode($_) } split ('/', $request_URI, -1);
+    my $URI_LENGTH    = length($request_URI)  || 0; # get true length
+    if ($URI_LENGTH && $VIRTUAL_MAX > 0 && $URI_LENGTH > $VIRTUAL_MAX) {
+      $flex_error .=
+'413 Payload Too Large: '.$URI_LENGTH.' bytes '
+.' bytes. Limit is: '.$VIRTUAL_MAX.'! IP:'.$ENV{'REMOTE_ADDR'}."\n";
+    }
+     else {
+     @virtual_url = map { url_decode($_) } split ('/', $request_URI, -1);
+     }
   }
   
+ }
+ 
+ # locks down get and post only...
+ # this can error if a REST API was used.
+ # 405 Method Not Allowed
+ # https://tools.ietf.org/html/rfc7231#section-6.5.5
+ if ($request_meth !~ m/\APOST\z|\AGET\z/) {
+ $flex_error .= '405 (Method Not Allowed): '.$request_meth
+ .', GET or POST only at Flex_CGI.pm'."\n";
+ }
+
+ # this can error on file uploads
+ if ($content_type !~ m/\A\z|\Aapplication\/x-www-form-urlencoded\z/) {
+ $flex_error .= '415 (Unsupported Media Type): '.$content_type
+ .' not supported at Flex_CGI.pm'."\n";
  }
  
  return bless {};
@@ -138,16 +174,16 @@ sub url_decode {
  my $decode = shift || '';
  if ($decode) {
   $decode =~ tr/+/ /;
-  $decode =~ s/%([\da-fA-F]{2})/ pack "C", hex $1 /eg;
+  $decode =~ s/%([\da-f]{2})/ pack "C", hex $1 /egi;
   $decode =~ s/\r//g; # windows and *nix fix
  }
  return $decode;
 }
 
-sub url_encode { # check case
+sub url_encode { # check case, check encoding
  my $encode = shift || '';
  if ($encode) {
-  $encode =~ s/([^a-z0-9\-_.!~*'() ])/ uc sprintf "%%%02x",ord $1 /egi;
+  $encode =~ s/([^\d\w\-.!~*'() ])/ uc sprintf "%%%02x",ord $1 /egi;
   $encode =~ tr/ /+/;
  }
  return $encode;
@@ -174,7 +210,7 @@ sub param {
   (defined $name && exists $QUERY{$name})
    ? return $QUERY{$name} : return $return_this;
 }
-# maybe do an array like the others
+
 sub multi_param{
  my $self = shift;
  my $name = shift;
@@ -267,11 +303,15 @@ my $header = '';
   my $protocol = $ENV{'SERVER_PROTOCOL'} || 'HTTP/1.0';
   push(@header,$protocol . ' ' . $header{'-status'}) if $NPH;
   push(@header,'Server: ' . $ENV{'SERVER_SOFTWARE'}) if $NPH;
-  push(@header,'Status: '.$header{'-status'}) if exists $header{'-status'} && $header{'-status'};
-  push(@header,'Window-Target: '.$header{'-target'}) if exists $header{'-target'} && $header{'-target'};
+  push(@header,'Status: '.$header{'-status'})
+   if exists $header{'-status'} && $header{'-status'};
+  push(@header,'Window-Target: '.$header{'-target'})
+   if exists $header{'-target'} && $header{'-target'};
 # push all the cookies -- there may be several
   if ($header{'-cookie'}) {
-   my @cookie = ref($header{'-cookie'}) && ref($header{'-cookie'}) eq 'ARRAY' ? @{$header{'-cookie'}} : $header{'-cookie'};
+   my @cookie = ref($header{'-cookie'})
+    && ref($header{'-cookie'}) eq 'ARRAY'
+     ? @{$header{'-cookie'}} : $header{'-cookie'};
    for (@cookie) {
     push(@header,'Set-Cookie: '."$_") if $_;
    }
@@ -279,7 +319,7 @@ my $header = '';
 # if the user indicates an expiration time, then we need
 # both an Expires and a Date header (so that the browser is
 # uses OUR clock)
-  push(@header,'Expires: '. expires($header{'-expires'},'http'))
+  push(@header,'Expires: '. expires($header{'-expires'}))
    if exists $header{'-expires'} && $header{'-expires'};
   push(@header,'Date: ' . expires(0,'http'))
    if exists $header{'-expires'} && $header{'-expires'}
@@ -292,7 +332,8 @@ my $header = '';
   push(@header,'Access-Control-Allow-Origin: '.$header{'-origin'})
    if exists $header{'-origin'} && $header{'-origin'};
   #
-  push(@header,'Pragma: no-cache') if exists $header{'-cache'} && $header{'-cache'};
+  push(@header,'Pragma: no-cache')
+   if exists $header{'-cache'} && $header{'-cache'};
   push(@header,'Content-Disposition: attachment; filename="'.$header{'-attachment'}.'"')
    if exists $header{'-attachment'} && $header{'-attachment'};
 
@@ -321,12 +362,9 @@ my $header = '';
 }
 
 # This internal routine creates date strings suitable for use in
-# cookies and HTTP headers.  (They differ, unfortunately.)
-# Thanks to Mark Fisher for this.
+# cookies and HTTP headers.
 sub expires {
     my $time = shift;
-    my $format = shift || 'http';
-    #$format ||= 'http';
 
     my @MON = qw/Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec/;
     my @WDAY = qw/Sun Mon Tue Wed Thu Fri Sat/;
@@ -335,13 +373,13 @@ sub expires {
     $time = expire_calc($time);
     return $time unless $time =~ /^\d+$/;
 
-    # make HTTP/cookie date string from GMT'ed time
-    # (cookies use '-' as date separator, HTTP uses ' ')
-    my $sc = ' ';
-    $sc = '-' if $format eq 'cookie';
+    # HTTP Cookies do not use '-' as date separator.
+    # make_cookie and header use the same time format.
+    # https://tools.ietf.org/html/rfc2616#section-3.3.1
     my($sec,$min,$hour,$mday,$mon,$year,$wday) = gmtime($time);
     $year += 1900;
-    return sprintf("%s, %02d$sc%s$sc%04d %02d:%02d:%02d GMT",
+    # Sun, 06 Nov 1994 08:49:37 GMT
+    return sprintf('%s, %02d %s %04d %02d:%02d:%02d GMT',
                    $WDAY[$wday],$mday,$MON[$mon],$year,$hour,$min,$sec);
 }
 
@@ -380,6 +418,7 @@ sub expire_calc {
     return (time+$offset);
 }
 
+# fixed expires date format
 sub make_cookie {
 my $self = shift;
 my %cookie = @_;
@@ -391,46 +430,22 @@ if (exists $cookie{'-name'} && $cookie{'-name'}) {
  $cookie{'-value'} = join '&', map { escape(defined $_ ? $_ : '') } $cookie{'-value'};  # "&"
  my $spc = '; ';
  $cookie = $cookie{'-name'}.'='.$cookie{'-value'};
- $cookie .= $spc.'domain='.$cookie{'-domain'}
+ $cookie .= $spc.'Domain='.$cookie{'-domain'}
   if exists $cookie{'-domain'} && $cookie{'-domain'};
- $cookie .= $spc.'path='.$cookie{'-path'}
+ $cookie .= $spc.'Path='.$cookie{'-path'}
   if $cookie{'-path'};
- $cookie .= $spc.'expires='.expires($cookie{'-expires'},'cookie')
+# Sun, 06 Nov 1994 08:49:37 GMT
+ $cookie .= $spc.'Expires='.expires($cookie{'-expires'})
   if exists $cookie{'-expires'} && $cookie{'-expires'};
- $cookie .= $spc.'max-age='.expire_calc($cookie{'-max_age'})-time()
+ $cookie .= $spc.'Max-Age='.expire_calc($cookie{'-max_age'})-time()
   if exists $cookie{'-max_age'} && $cookie{'-max_age'};
- $cookie .= $spc.'secure'
+ $cookie .= $spc.'Secure'
   if exists $cookie{'-secure'} && $cookie{'-secure'};
  $cookie .= $spc.'HttpOnly'
   if exists $cookie{'-httponly'} && $cookie{'-httponly'};
  }
   return $cookie;
 }
-
-#sub make_cookie {
-#my ($self, %cookie) = @_;
-
-#if (exists $cookie{'-name'} && $cookie{'-name'}) {
-# $cookie{'-path'} ||= '/';
-# $cookie{'-name'} = escape($cookie{'-name'});
-# $cookie{'-value'} = join "&", map { escape(defined $_ ? $_ : '') } $cookie{'-value'};
-# my @cookie = ( $cookie{'-name'}.'='.$cookie{'-value'} );
-# push @cookie,'domain='.$cookie{'-domain'}
-#  if exists $cookie{'-domain'} && $cookie{'-domain'};
-# push @cookie,'path='.$cookie{'-path'}
-#  if $cookie{'-path'};
-# push @cookie,'expires='.expires($cookie{'-expires'},'cookie')
-#  if exists $cookie{'-expires'} && $cookie{'-expires'};
-# push @cookie,'max-age='.expire_calc($cookie{'-max_age'})-time()
-#  if exists $cookie{'-max_age'} && $cookie{'-max_age'};
-# push @cookie,'secure'
-#  if exists $cookie{'-secure'} && $cookie{'-secure'};
-# push @cookie, 'HttpOnly'
-#  if exists $cookie{'-httponly'} && $cookie{'-httponly'};
-# return join '; ', @cookie;
-#}
-# else { return ''; }
-#}
 
 sub escape {
  my $text = shift;
@@ -446,18 +461,29 @@ __END__
 =pod
 =head1 COPYLEFT
 
-Flex_CGI.pm, v0.11 08/16/2016 N.K.A
+Flex_CGI.pm, v0.12 09/03/2016 N.K.A.
 
 This file is part of Flex-WPS Evo3.
-Flex_CGI.pm was a highly optimized remake of some parts of CGI.pm.
-This does not have a lot of old support,
+Flex_CGI.pm is a highly optimized remake of some parts of CGI.pm.
+This will not have a lot of old support,
 target support is *nix, windows, Apache Only
-does param, header, cookies, virual url
+does HTTP param, header, cookies, virual url
 
+Notes: The sad reality is any client using HTTP 1.0 is a security risk to the
+rest of the system. 1.0 clients do not support the new security headers making
+any client using 1.0 a potential botnet slave. So bending backwords to support
+out dated software is not what I'm going to do.
 
 History
-Adding bits of rfc 7230 standars but I have not read the hole standard yet.
-So I can not call the update to rfc 7230 100% done.
+Adding bits of rfc 7230 and new standards but I have not read all the
+standards yet, so I can not call the updates 100% done.
+
+v0.12 - 09/03/2016
+Fixed make_cookie Expires date format should not have '-' in it
+New expires($time); old expires($time, $format);
+$format is removed, because there is only one format so the value is dead code.
+Added error for 405 (Method Not Allowed) POST/GET only
+Added error for 415 (Unsupported Media Type) content type not supported
 
 v0.11 - 8/20/2016
 Added Virtual URL www.place.com/this/virtual/URL/is/found
