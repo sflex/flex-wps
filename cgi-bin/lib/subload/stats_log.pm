@@ -122,29 +122,6 @@ $sth->finish;
 
 $cfg{check_ban} = 1;
 
- if ($ENV{'REMOTE_ADDR'} eq '46.148.18.162') {
-  core::write_error($cfg{core_error})
-   if exists $cfg{core_error} && $cfg{core_error};
-     Crash_em();
- }
-}
-
-#sub script_escaper {
-#my $text = shift;
-#return $AUBBC->script_escape('text' => $text, 'option' => '',
-#  'html_type' => ' /', 'line_break' => '1',);
-#}
-
-sub Crash_em {
-print <<HEADER;
-http://darksky.slac.stanford.edu/simulations/ds14_a/ds14_a_1.0000
-
-HEADER
-  # http://speedtest.tele2.net/1000GB.zip
-  
-  # 34 TB file with love from stanford
-  #http://darksky.slac.stanford.edu/simulations/ds14_a/ds14_a_1.0000
-    exit(0);
 }
 
 1;
